@@ -11,6 +11,6 @@ const vec3 LIGHT_POS = vec3(10, 10, 10);
 void main()
 {
     //outColor = vec4((inNormal+1)/2, 1.0);
-    //outColor = vec4(inColor * max(0.1, dot(inNormal, LIGHT_POS - inPos)), 1.0);
-    outColor = vec4(inColor, 1.0);
+    outColor = vec4(inColor * max(0.1, dot(normalize(inNormal), normalize(LIGHT_POS - inPos))), 1.0);
+    //outColor = vec4(inColor, 1.0);
 }

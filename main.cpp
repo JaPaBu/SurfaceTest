@@ -155,11 +155,11 @@ void update_simulation_worker(const std::vector<F> &old_us, const std::vector<F>
         }
 
         const auto &L = sum * mass_matrix.at(vi);
-//        us[vi] = old_u + L * dt;
+        us[vi] = old_u + L * dt;
 
-        F vel = old_vs.at(vi) + L * dt;
-        vs[vi] = vel;
-        us[vi] = old_u + vel * dt;
+//        const F vel = old_vs.at(vi) + L * dt;
+//        vs[vi] = vel;
+//        us[vi] = old_u + vel * dt;
     }
 }
 
@@ -195,7 +195,7 @@ void update_simulation(std::vector<F> &us, std::vector<F> &vs, const F &dt, cons
 }
 
 int main() {
-    auto model = load_obj("square.obj");
+    auto model = load_obj("torus.obj");
 
     auto vertices = model.vertices;
     auto normals = model.normals;
@@ -207,29 +207,10 @@ int main() {
         u[i] = 0;
         vels[i] = 0;
 
-        if(glm::dot(model.vertices[i], model.vertices[i]) < 0.08) {
-            u[i] = 1;
+        if(glm::distance(model.vertices[i], glm::vec3(1, 0, 0)) < 0.3) {
+            u[i] = 20;
         }
     }
-//    for (unsigned i = 50; i < 60; i++) {
-//        u[i] = 10;
-//    }
-//    u[0] = 1;
-//    u[1] = 1;
-//    u[2] = 1;
-
-//    u[11] = 1;
-
-//    F nearestValue = -INFINITY;
-//    uint32_t nearestIndex = 0;
-//    for (size_t i = 0; i < model.vertices.size(); i++) {
-//        const auto &v = model.vertices.at(i);
-//        if (v[2] > nearestValue) {
-//            nearestValue = v[2];
-//            nearestIndex = i;
-//        }
-//    }
-//    u[nearestIndex] = 2000;
 
     std::map<std::pair<uint32_t, uint32_t>, F> cot_sums_matrix;
     std::map<uint32_t, F> mass_matrix;
@@ -247,7 +228,7 @@ int main() {
     GLFWwindow *window;
     GLuint vertex_buffer, normal_buffer, index_buffer, u_buffer;
     GLuint vertex_shader, fragment_shader, program;
-    GLint mvp_location, pos_location, normal_location, u_location;
+    GLint mv_location, p_location, pos_location, normal_location, u_location;
 
     glfwSetErrorCallback(error_callback);
 
@@ -288,7 +269,8 @@ int main() {
     glLinkProgram(program);
     if (!check_program(program, "program")) return EXIT_FAILURE;
 
-    mvp_location = glGetUniformLocation(program, "MVP");
+    mv_location = glGetUniformLocation(program, "uMv");
+    p_location = glGetUniformLocation(program, "uP");
     pos_location = glGetAttribLocation(program, "inPos");
     normal_location = glGetAttribLocation(program, "inNormal");
     u_location = glGetAttribLocation(program, "inU");
@@ -341,15 +323,16 @@ int main() {
         //m = glm::rotate(m, (F) glfwGetTime() / 20, glm::vec3(0, 1, 0));
 
         v = glm::identity<glm::mat4>();
-        v = glm::translate(v, glm::vec3(0, 0, -1.5f));
-        v = glm::rotate(v, 0.1f, glm::vec3(1, 0, 0));
+        v = glm::translate(v, glm::vec3(0, 0.2, -1.5f));
+        v = glm::rotate(v, 1.0f, glm::vec3(1, 0, 0));
 
         p = glm::perspective(glm::pi<F>() / 2, ratio, (F) 0.1, (F) 100.0);
 
-        mvp = p * v * m;
+        auto mv = v * m;
 
         glUseProgram(program);
-        glUniformMatrix4fv(mvp_location, 1, GL_FALSE, glm::value_ptr(mvp));
+        glUniformMatrix4fv(mv_location, 1, GL_FALSE, glm::value_ptr(mv));
+        glUniformMatrix4fv(p_location, 1, GL_FALSE, glm::value_ptr(p));
         glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, nullptr);
 
         glfwSwapBuffers(window);
