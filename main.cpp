@@ -96,6 +96,7 @@ void calculate_cot_sums_matrix(const model &m, std::map<std::pair<uint32_t, uint
                 const auto theta = glm::angle(glm::normalize(nn_to_v), glm::normalize(nn_to_n));
                 cot_sum += glm::cot(theta);
             }
+            cot_sum /= nnis.size();
 
             cot_sums_matrix.insert({{ni, vi}, cot_sum});
             cot_sums_matrix.insert({{vi, ni}, cot_sum});
@@ -107,7 +108,7 @@ void calculate_mass_matrix(const model &m, std::map<uint32_t, F> &mass_matrix) {
     for (uint32_t vi = 0; vi < m.vertices.size(); vi++) {
         const auto &v = m.vertices.at(vi);
 
-        F two_Ai = 0;
+        F Ai = 0;
         auto edges_done = std::set<std::pair<uint32_t, uint32_t>>();
 
         for (const auto &ni : m.neighbors.at(vi)) {
@@ -128,13 +129,13 @@ void calculate_mass_matrix(const model &m, std::map<uint32_t, F> &mass_matrix) {
                 const auto &nn = m.vertices[nni];
                 const auto &v_to_n = n - v;
                 const auto &v_to_nn = nn - v;
-                two_Ai += glm::length(glm::cross(v_to_n, v_to_nn)) / 3;
+                Ai += glm::length(glm::cross(v_to_n, v_to_nn)) / 6;
                 edges_done.emplace(ni, nni);
                 edges_done.emplace(nni, ni);
             }
         }
 
-        mass_matrix.insert({vi, two_Ai});
+        mass_matrix.insert({vi, 1 / Ai});
     }
 }
 
@@ -153,12 +154,12 @@ void update_simulation_worker(const std::vector<F> &old_us, const std::vector<F>
             sum += cot_sums_matrix.at({ni, vi}) * (old_us.at(ni) - old_u);
         }
 
-        const auto &L = sum / mass_matrix.at(vi);
-        us[vi] = old_u + L * dt;
+        const auto &L = sum * mass_matrix.at(vi);
+//        us[vi] = old_u + L * dt;
 
-//        F vel = old_vs.at(vi) + L * dt;
-//        vs[vi] = vel;
-//        us[vi] = old_u + vel * dt;
+        F vel = old_vs.at(vi) + L * dt;
+        vs[vi] = vel;
+        us[vi] = old_u + vel * dt;
     }
 }
 
@@ -194,7 +195,7 @@ void update_simulation(std::vector<F> &us, std::vector<F> &vs, const F &dt, cons
 }
 
 int main() {
-    auto model = load_obj("surface.obj");
+    auto model = load_obj("square.obj");
 
     auto vertices = model.vertices;
     auto normals = model.normals;
@@ -207,7 +208,7 @@ int main() {
         vels[i] = 0;
 
         if(glm::dot(model.vertices[i], model.vertices[i]) < 0.08) {
-            u[i] = 2;
+            u[i] = 1;
         }
     }
 //    for (unsigned i = 50; i < 60; i++) {
@@ -325,7 +326,7 @@ int main() {
         glfwGetFramebufferSize(window, &width, &height);
         F ratio = (F) width / (F) height;
 
-        update_simulation(u, vels, 0.00001f, model, cot_sums_matrix, mass_matrix);
+        update_simulation(u, vels, 0.0001f, model, cot_sums_matrix, mass_matrix);
 
         glBindBuffer(GL_ARRAY_BUFFER, u_buffer);
         glBufferData(GL_ARRAY_BUFFER, u.size() * sizeof(u[0]), u.data(), GL_DYNAMIC_DRAW);
