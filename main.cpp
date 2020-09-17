@@ -15,7 +15,6 @@
 #include <string>
 #include <fstream>
 #include <streambuf>
-#include <exception>
 #include <thread>
 
 #include "load_obj.hpp"
@@ -75,7 +74,7 @@ bool check_program(GLuint program, std::string name) {
     return true;
 }
 
-void calculate_cot_sums_matrix(const model &m, std::map<std::pair<uint32_t, uint32_t>, float> &cot_sums_matrix) {
+void calculate_cot_sums_matrix(const model &m, std::map<std::pair<uint32_t, uint32_t>, F> &cot_sums_matrix) {
     for (uint32_t vi = 0; vi < m.vertices.size(); vi++) {
         const auto &v = m.vertices.at(vi);
 
@@ -89,7 +88,7 @@ void calculate_cot_sums_matrix(const model &m, std::map<std::pair<uint32_t, uint
             nnis.insert(vi_to_ni.begin(), vi_to_ni.end());
             nnis.insert(ni_to_vi.begin(), ni_to_vi.end());
 
-            float cot_sum = 0;
+            F cot_sum = 0;
             for (const auto &nni : nnis) {
                 const auto &nn = m.vertices[nni];
                 const auto &nn_to_v = v - nn;
@@ -104,11 +103,11 @@ void calculate_cot_sums_matrix(const model &m, std::map<std::pair<uint32_t, uint
     }
 }
 
-void calculate_mass_matrix(const model &m, std::map<uint32_t, float> &mass_matrix) {
+void calculate_mass_matrix(const model &m, std::map<uint32_t, F> &mass_matrix) {
     for (uint32_t vi = 0; vi < m.vertices.size(); vi++) {
         const auto &v = m.vertices.at(vi);
 
-        float two_Ai = 0;
+        F two_Ai = 0;
         auto edges_done = std::set<std::pair<uint32_t, uint32_t>>();
 
         for (const auto &ni : m.neighbors.at(vi)) {
@@ -139,36 +138,38 @@ void calculate_mass_matrix(const model &m, std::map<uint32_t, float> &mass_matri
     }
 }
 
-void update_simulation_part(const std::vector<float> &old_us, std::vector<float> &us, std::vector<float> &vels,
-                            const uint32_t &start, const uint32_t &end,
-                            const float &dt, const model &m,
-                            const std::map<std::pair<uint32_t, uint32_t>, float> &cot_sums_matrix,
-                            const std::map<uint32_t, float> &mass_matrix) {
-//    for (uint32_t vi = start; vi < end; vi++) {
-//        const auto &v = m.vertices.at(vi);
-//
-//        float sum = 0;
-//        for (const auto &ni : m.neighbors.at(vi)) {
-//            sum += cot_sums_matrix.at({ni, vi}) * (us[ni] - us[vi]);
-//        }
-//
-//        const auto &L = sum / mass_matrix.at(vi);
-//        us[vi] += L * dt;
-//    }
+void update_simulation_worker(const std::vector<F> &old_us, const std::vector<F> &old_vs, std::vector<F> &us,
+                              std::vector<F> &vs,
+                              const uint32_t start, const uint32_t end,
+                              const F &dt, const model &m,
+                              const std::map<std::pair<uint32_t, uint32_t>, F> &cot_sums_matrix,
+                              const std::map<uint32_t, F> &mass_matrix) {
+    for (uint32_t vi = start; vi < end; vi++) {
+        const auto &old_u = old_us.at(vi);
+        const auto &v = m.vertices.at(vi);
+
+        F sum = 0;
+        for (const auto &ni : m.neighbors.at(vi)) {
+            sum += cot_sums_matrix.at({ni, vi}) * (old_us.at(ni) - old_u);
+        }
+
+        const auto &L = sum / mass_matrix.at(vi);
+        us[vi] = old_u + L * dt;
+
+//        F vel = old_vs.at(vi) + L * dt;
+//        vs[vi] = vel;
+//        us[vi] = old_u + vel * dt;
+    }
 }
 
-void abc() {
-
-}
-
-void update_simulation(std::vector<float> &us, std::vector<float> &vels, const float &dt, const model &m,
-                       const std::map<std::pair<uint32_t, uint32_t>, float> &cot_sums_matrix,
-                       const std::map<uint32_t, float> &mass_matrix) {
+void update_simulation(std::vector<F> &us, std::vector<F> &vs, const F &dt, const model &m,
+                       const std::map<std::pair<uint32_t, uint32_t>, F> &cot_sums_matrix,
+                       const std::map<uint32_t, F> &mass_matrix) {
 
     const auto old_us = us;
+    const auto old_vs = vs;
 
-    auto n = std::thread::hardware_concurrency();
-    n = 1;
+    uint32_t n = std::max(1u, std::thread::hardware_concurrency());
     std::vector<std::thread> threads(n);
     for (auto i = 0; i < n; i++) {
         uint32_t batch_size = m.vertices.size() / n;
@@ -177,22 +178,14 @@ void update_simulation(std::vector<float> &us, std::vector<float> &vels, const f
         auto end = (i + 1) * batch_size;
 
         if (i == n - 1) {
-            end += batch_size % n;
+            end += m.vertices.size() % n;
         }
 
-//        auto t = std::thread(update_simulation_part, std::cref(old_us), std::ref(us), std::ref(vels), std::cref(start),
-//                    std::cref(end), std::cref(dt), std::cref(m), std::cref(cot_sums_matrix),
-//                    std::cref(mass_matrix));
-
-
-
-
-        threads.push_back(std::thread(abc));
-
-//        threads.push_back(std::thread(update_simulation_part, std::cref(old_us), std::ref(us), std::ref(vels), std::cref(start),
-//                             std::cref(end), std::cref(dt), std::cref(m), std::cref(cot_sums_matrix),
-//                             std::cref(mass_matrix)));
-        //update_simulation_part(old_us, us, vels, i * batch_size, (i + 1) * batch_size, dt, m, cot_sums_matrix, mass_matrix);
+        threads[i] = std::thread(update_simulation_worker, std::cref(old_us), std::cref(old_vs), std::ref(us),
+                                 std::ref(vs),
+                                 start, end, std::cref(dt), std::cref(m),
+                                 std::cref(cot_sums_matrix),
+                                 std::cref(mass_matrix));
     }
 
     for (auto &t : threads) {
@@ -201,33 +194,44 @@ void update_simulation(std::vector<float> &us, std::vector<float> &vels, const f
 }
 
 int main() {
-    auto model = load_obj("teapot2.obj");
+    auto model = load_obj("surface.obj");
 
     auto vertices = model.vertices;
     auto normals = model.normals;
     auto indices = model.indices;
 
     auto u = std::vector<float>(vertices.size());
-    auto vels = std::vector<float>(vertices.size());
-//    for (unsigned i = 0; i < model.vertices.size(); i++) {
-//        u[i] = (i / 2) % 50 == 0 ? 10 : 0;
-//        vels[i] = 0;
-//    }
+    auto vels = std::vector<F>(vertices.size());
+    for (unsigned i = 0; i < vertices.size(); i++) {
+        u[i] = 0;
+        vels[i] = 0;
 
-    float nearestValue = -INFINITY;
-    uint32_t nearestIndex = 0;
-    for (size_t i = 0; i < model.vertices.size(); i++) {
-        const auto &v = model.vertices.at(i);
-        if (v[2] > nearestValue) {
-            nearestValue = v[2];
-            nearestIndex = i;
+        if(glm::dot(model.vertices[i], model.vertices[i]) < 0.08) {
+            u[i] = 2;
         }
     }
+//    for (unsigned i = 50; i < 60; i++) {
+//        u[i] = 10;
+//    }
+//    u[0] = 1;
+//    u[1] = 1;
+//    u[2] = 1;
 
-    u[nearestIndex] = 200;
+//    u[11] = 1;
 
-    std::map<std::pair<uint32_t, uint32_t>, float> cot_sums_matrix;
-    std::map<uint32_t, float> mass_matrix;
+//    F nearestValue = -INFINITY;
+//    uint32_t nearestIndex = 0;
+//    for (size_t i = 0; i < model.vertices.size(); i++) {
+//        const auto &v = model.vertices.at(i);
+//        if (v[2] > nearestValue) {
+//            nearestValue = v[2];
+//            nearestIndex = i;
+//        }
+//    }
+//    u[nearestIndex] = 2000;
+
+    std::map<std::pair<uint32_t, uint32_t>, F> cot_sums_matrix;
+    std::map<uint32_t, F> mass_matrix;
 
     calculate_cot_sums_matrix(model, cot_sums_matrix);
     calculate_mass_matrix(model, mass_matrix);
@@ -315,30 +319,31 @@ int main() {
     glEnable(GL_DEPTH_TEST);
 
     while (!glfwWindowShouldClose(window)) {
-        float ratio;
         int width, height;
         glm::mat4 m, v, p, mvp;
 
         glfwGetFramebufferSize(window, &width, &height);
-        ratio = (float) width / (float) height;
+        F ratio = (F) width / (F) height;
 
-        update_simulation(u, vels, 0.0005f, model, cot_sums_matrix, mass_matrix);
+        update_simulation(u, vels, 0.00001f, model, cot_sums_matrix, mass_matrix);
 
         glBindBuffer(GL_ARRAY_BUFFER, u_buffer);
         glBufferData(GL_ARRAY_BUFFER, u.size() * sizeof(u[0]), u.data(), GL_DYNAMIC_DRAW);
 
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
         m = glm::identity<glm::mat4>();
         //m = glm::scale(m, glm::vec3(glm::sin(glfwGetTime()), -2*glm::sin(glfwGetTime()*0.3), glm::cos(glfwGetTime())*0.551));
-        //m = glm::rotate(m, (float) glfwGetTime(), glm::vec3(1, 1, 1));
-        //m = glm::rotate(m, (float) glfwGetTime() / 20, glm::vec3(0, 1, 0));
+        //m = glm::rotate(m, (F) glfwGetTime(), glm::vec3(1, 1, 1));
+        //m = glm::rotate(m, (F) glfwGetTime() / 20, glm::vec3(0, 1, 0));
 
         v = glm::identity<glm::mat4>();
-        v = glm::translate(v, glm::vec3(0, 0, -30));
+        v = glm::translate(v, glm::vec3(0, 0, -1.5f));
+        v = glm::rotate(v, 0.1f, glm::vec3(1, 0, 0));
 
-        p = glm::perspective(glm::pi<float>() / 2, ratio, 0.1f, 100.0f);
+        p = glm::perspective(glm::pi<F>() / 2, ratio, (F) 0.1, (F) 100.0);
 
         mvp = p * v * m;
 

@@ -7,6 +7,9 @@
 #include <sstream>
 #include <set>
 
+
+typedef float F;
+
 class model {
 public:
     std::vector<glm::vec3> vertices;
@@ -33,35 +36,36 @@ model load_obj(std::string filename) {
     std::vector<glm::vec3> normals;
     std::vector<uint32_t> indices;
 
-    std::map<std::string, uint32_t> indexMap;
+    std::map<uint32_t, uint32_t> indexMap;
 
     model m;
 
-    auto parse_vertex = [&](std::string text) {
-//        auto index = indexMap.find(text);
-//        if (index != indexMap.end()) {
-//            return index->second;
-//        }
-
+    auto parse_vertex = [&](const std::string &text) {
         auto splits = split(text, '/');
 
-        auto index = indexMap.find(splits[0]);
+        auto s = [](const std::string &s) {
+            if (s.empty()) return -1;
+            return std::stoi(s) - 1;
+        };
+
+        auto vi = s(splits[0]);
+
+        auto index = indexMap.find(vi);
         if (index != indexMap.end()) {
             return index->second;
         }
 
-        auto vi = std::stoi(splits[0]) - 1;
-        auto ti = std::stoi(splits[1]) - 1;
-        auto ni = std::stoi(splits[2]) - 1;
+        auto ti = s(splits[1]);
+        auto ni = s(splits[2]);
 
         uint32_t i = m.vertices.size();
 
-        m.vertices.emplace_back(vertices[vi]);
-        m.textureCoords.emplace_back(textureCoords[ti]);
-        m.normals.emplace_back(normals[ni]);
 
-        //indexMap.insert({text, i});
-        indexMap.insert({splits[0], i});
+        if (vi != -1) m.vertices.emplace_back(vertices[vi]);
+        if (ti != -1) m.textureCoords.emplace_back(textureCoords[ti]);
+        if (ni != -1) m.normals.emplace_back(normals[ni]);
+
+        indexMap.insert({vi, i});
 
         return i;
     };
@@ -75,15 +79,15 @@ model load_obj(std::string filename) {
         ss >> c;
 
         if (c == "v") {
-            float x, y, z;
+            F x, y, z;
             ss >> x >> y >> z;
             vertices.emplace_back(x, y, z);
         } else if (c == "vt") {
-            float x, y, z;
+            F x, y, z;
             ss >> x >> y >> z;
             textureCoords.emplace_back(x, y);
         } else if (c == "vn") {
-            float x, y, z;
+            F x, y, z;
             ss >> x >> y >> z;
             normals.emplace_back(x, y, z);
         } else if (c == "f") {
