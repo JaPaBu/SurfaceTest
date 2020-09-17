@@ -16,6 +16,7 @@
 #include <fstream>
 #include <streambuf>
 #include <exception>
+#include <thread>
 
 #include "load_obj.hpp"
 
@@ -74,35 +75,54 @@ bool check_program(GLuint program, std::string name) {
     return true;
 }
 
-void calculate_coefficients(std::map<std::pair<uint32_t, uint32_t>, float>& cot_sums_matrix, std::map<uint32_t, float>& mass_matrix) {
-
-}
-
-void update_simulation(std::vector<float> &us, std::vector<float> &vels, const float& dt, const model &m, const std::map<std::pair<uint32_t, uint32_t>, float>& cot_sums_matrix, const std::map<uint32_t, float>& mass_matrix) {
-    for (uint32_t vi = 0; vi < us.size(); vi++) {
+void calculate_cot_sums_matrix(const model &m, std::map<std::pair<uint32_t, uint32_t>, float> &cot_sums_matrix) {
+    for (uint32_t vi = 0; vi < m.vertices.size(); vi++) {
         const auto &v = m.vertices.at(vi);
 
-        //calculate Ai
-        float two_Ai = 0;
-        auto edges_done = std::set<std::pair<uint32_t, uint32_t>>();
+        for (const auto &ni : m.neighbors.at(vi)) {
+            const auto &n = m.vertices[ni];
 
-        for (const auto &ni : m.neighbors.find(vi)->second) {
-            const auto &n = m.vertices.at(ni);
-
-            //neighbors neighbors that also connect to vi
             auto nnis = std::set<uint32_t>();
 
-            const auto &vi_to_ni = m.edgeOpposites.find({vi, ni})->second;
-            const auto &ni_to_vi = m.edgeOpposites.find({ni, vi})->second;
+            const auto &vi_to_ni = m.edgeOpposites.at({vi, ni});
+            const auto &ni_to_vi = m.edgeOpposites.at({ni, vi});
             nnis.insert(vi_to_ni.begin(), vi_to_ni.end());
             nnis.insert(ni_to_vi.begin(), ni_to_vi.end());
 
-            if (nnis.size() > 2 || nnis.empty()) {
-                throw std::runtime_error("wtfff");
+            float cot_sum = 0;
+            for (const auto &nni : nnis) {
+                const auto &nn = m.vertices[nni];
+                const auto &nn_to_v = v - nn;
+                const auto &nn_to_n = n - nn;
+                const auto theta = glm::angle(glm::normalize(nn_to_v), glm::normalize(nn_to_n));
+                cot_sum += glm::cot(theta);
             }
 
+            cot_sums_matrix.insert({{ni, vi}, cot_sum});
+            cot_sums_matrix.insert({{vi, ni}, cot_sum});
+        }
+    }
+}
+
+void calculate_mass_matrix(const model &m, std::map<uint32_t, float> &mass_matrix) {
+    for (uint32_t vi = 0; vi < m.vertices.size(); vi++) {
+        const auto &v = m.vertices.at(vi);
+
+        float two_Ai = 0;
+        auto edges_done = std::set<std::pair<uint32_t, uint32_t>>();
+
+        for (const auto &ni : m.neighbors.at(vi)) {
+            const auto &n = m.vertices.at(ni);
+
+            auto nnis = std::set<uint32_t>();
+
+            const auto &vi_to_ni = m.edgeOpposites.at({vi, ni});
+            const auto &ni_to_vi = m.edgeOpposites.at({ni, vi});
+            nnis.insert(vi_to_ni.begin(), vi_to_ni.end());
+            nnis.insert(ni_to_vi.begin(), ni_to_vi.end());
+
             for (const auto &nni : nnis) {
-                if (edges_done.find({ni, nni}) != edges_done.end()) {
+                if (edges_done.count({ni, nni}) > 0) {
                     continue;
                 }
 
@@ -116,37 +136,67 @@ void update_simulation(std::vector<float> &us, std::vector<float> &vels, const f
         }
 
         mass_matrix.insert({vi, two_Ai});
+    }
+}
 
-        float sum = 0;
-        for (const auto &ni : m.neighbors[vi]) {
-            const auto &n = m.vertices[ni];
+void update_simulation_part(const std::vector<float> &old_us, std::vector<float> &us, std::vector<float> &vels,
+                            const uint32_t &start, const uint32_t &end,
+                            const float &dt, const model &m,
+                            const std::map<std::pair<uint32_t, uint32_t>, float> &cot_sums_matrix,
+                            const std::map<uint32_t, float> &mass_matrix) {
+//    for (uint32_t vi = start; vi < end; vi++) {
+//        const auto &v = m.vertices.at(vi);
+//
+//        float sum = 0;
+//        for (const auto &ni : m.neighbors.at(vi)) {
+//            sum += cot_sums_matrix.at({ni, vi}) * (us[ni] - us[vi]);
+//        }
+//
+//        const auto &L = sum / mass_matrix.at(vi);
+//        us[vi] += L * dt;
+//    }
+}
 
-            //neighbors neighbors that also connect to vi
-            auto nnis = std::set<uint32_t>();
+void abc() {
 
-            const auto &vi_to_ni = m.edgeOpposites[{vi, ni}];
-            const auto &ni_to_vi = m.edgeOpposites[{ni, vi}];
-            nnis.insert(vi_to_ni.begin(), vi_to_ni.end());
-            nnis.insert(ni_to_vi.begin(), ni_to_vi.end());
+}
 
-            //cot sum
-            float cot_sum = 0;
-            for (const auto &nni : nnis) {
-                const auto &nn = m.vertices[nni];
-                const auto &nn_to_v = v - nn;
-                const auto &nn_to_n = n - nn;
-                const auto theta = glm::angle(glm::normalize(nn_to_v), glm::normalize(nn_to_n));
-                cot_sum += glm::cot(theta);
-            }
+void update_simulation(std::vector<float> &us, std::vector<float> &vels, const float &dt, const model &m,
+                       const std::map<std::pair<uint32_t, uint32_t>, float> &cot_sums_matrix,
+                       const std::map<uint32_t, float> &mass_matrix) {
 
-            cot_sums_matrix.insert({{ni, vi}, cot_sum});
-            cot_sums_matrix.insert({{vi, ni}, cot_sum});
+    const auto old_us = us;
 
-            sum += cot_sums_matrix[{ni, vi}] * (us[ni] - us[vi]);
+    auto n = std::thread::hardware_concurrency();
+    n = 1;
+    std::vector<std::thread> threads(n);
+    for (auto i = 0; i < n; i++) {
+        uint32_t batch_size = m.vertices.size() / n;
+
+        auto start = i * batch_size;
+        auto end = (i + 1) * batch_size;
+
+        if (i == n - 1) {
+            end += batch_size % n;
         }
 
-        const auto &L = sum / mass_matrix[vi];
-        us[vi] += L * dt;
+//        auto t = std::thread(update_simulation_part, std::cref(old_us), std::ref(us), std::ref(vels), std::cref(start),
+//                    std::cref(end), std::cref(dt), std::cref(m), std::cref(cot_sums_matrix),
+//                    std::cref(mass_matrix));
+
+
+
+
+        threads.push_back(std::thread(abc));
+
+//        threads.push_back(std::thread(update_simulation_part, std::cref(old_us), std::ref(us), std::ref(vels), std::cref(start),
+//                             std::cref(end), std::cref(dt), std::cref(m), std::cref(cot_sums_matrix),
+//                             std::cref(mass_matrix)));
+        //update_simulation_part(old_us, us, vels, i * batch_size, (i + 1) * batch_size, dt, m, cot_sums_matrix, mass_matrix);
+    }
+
+    for (auto &t : threads) {
+        t.join();
     }
 }
 
@@ -159,41 +209,28 @@ int main() {
 
     auto u = std::vector<float>(vertices.size());
     auto vels = std::vector<float>(vertices.size());
-    for (unsigned i = 0; i < model.vertices.size(); i++) {
-        u[i] = (i / 2) % 50 == 0 ? 10 : 0;
-        vels[i] = 0;
-    }
-
-    int min = 1000, max = 0;
-
-//    for (auto n : model.neighbors) {
-//        min = std::min(min, (int)n.second.size());
-//        max = std::max(max, (int)n.second.size());
-//
-//        if(n.second.size() == 2) {
-//            normals[n.first] = glm::vec3(0, 0, 0);
-//            //vertices[n.first] *= 2;
-//        }
+//    for (unsigned i = 0; i < model.vertices.size(); i++) {
+//        u[i] = (i / 2) % 50 == 0 ? 10 : 0;
+//        vels[i] = 0;
 //    }
 
-    std::map<std::pair<uint32_t, uint32_t>, std::string> lol;
-
-    lol.insert({{1, 2}, "wtf"});
-
-    auto ggg = lol[{1, 2}];
-    auto gggh = lol.insert({{1, 2}, "lll"});
-
-    size_t minmin = 100;
-    size_t maxmax = 0;
-    for (const auto &oppositeEntry : model.edgeOpposites) {
-        minmin = std::min(minmin, oppositeEntry.second.size());
-        maxmax = std::max(maxmax, oppositeEntry.second.size());
+    float nearestValue = -INFINITY;
+    uint32_t nearestIndex = 0;
+    for (size_t i = 0; i < model.vertices.size(); i++) {
+        const auto &v = model.vertices.at(i);
+        if (v[2] > nearestValue) {
+            nearestValue = v[2];
+            nearestIndex = i;
+        }
     }
+
+    u[nearestIndex] = 200;
 
     std::map<std::pair<uint32_t, uint32_t>, float> cot_sums_matrix;
     std::map<uint32_t, float> mass_matrix;
 
-    calculate_coefficients(cot_sums_matrix, mass_matrix);
+    calculate_cot_sums_matrix(model, cot_sums_matrix);
+    calculate_mass_matrix(model, mass_matrix);
 
     if (!glfwInit()) {
         std::cerr << "glfwInit failed!" << std::endl;
@@ -222,7 +259,7 @@ int main() {
 
     glfwMakeContextCurrent(window);
     gladLoadGLLoader((GLADloadproc) glfwGetProcAddress);
-    glfwSwapInterval(1);
+    glfwSwapInterval(0);
 
     auto vertex_shader_text = read_file("shader.vert");
     auto fragment_shader_text = read_file("shader.frag");
@@ -286,6 +323,7 @@ int main() {
         ratio = (float) width / (float) height;
 
         update_simulation(u, vels, 0.0005f, model, cot_sums_matrix, mass_matrix);
+
         glBindBuffer(GL_ARRAY_BUFFER, u_buffer);
         glBufferData(GL_ARRAY_BUFFER, u.size() * sizeof(u[0]), u.data(), GL_DYNAMIC_DRAW);
 
@@ -295,7 +333,7 @@ int main() {
         m = glm::identity<glm::mat4>();
         //m = glm::scale(m, glm::vec3(glm::sin(glfwGetTime()), -2*glm::sin(glfwGetTime()*0.3), glm::cos(glfwGetTime())*0.551));
         //m = glm::rotate(m, (float) glfwGetTime(), glm::vec3(1, 1, 1));
-        m = glm::rotate(m, (float) glfwGetTime() / 20, glm::vec3(0, 1, 0));
+        //m = glm::rotate(m, (float) glfwGetTime() / 20, glm::vec3(0, 1, 0));
 
         v = glm::identity<glm::mat4>();
         v = glm::translate(v, glm::vec3(0, 0, -30));

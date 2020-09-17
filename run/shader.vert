@@ -15,6 +15,7 @@ void main()
     gl_Position = MVP * vec4(inPos, 1.0);
     outNormal = inNormal;
 
-    outColor = vec3(inU / 1, 0, 1 - inU / 1);
+    float u = clamp(inU, 0, 1);
+    outColor = vec3(u / 1, 0, 1 - u / 1);
     //outColor = inNormal;
 }
